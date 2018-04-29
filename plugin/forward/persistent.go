@@ -152,7 +152,7 @@ func (t *transport) Yield(c *dns.Conn) { t.yield <- c }
 // Stop stops the transport's connection manager.
 func (t *transport) Stop() {
 	t.signal <- true
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	close(t.stop)
 }
 
