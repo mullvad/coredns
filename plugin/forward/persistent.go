@@ -2,6 +2,7 @@ package forward
 
 import (
 	"crypto/tls"
+	"math/rand"
 	"net"
 	"time"
 
@@ -16,8 +17,8 @@ type persistConn struct {
 
 // transport hold the persistent cache.
 type transport struct {
-	conns     map[string][]*persistConn //  Buckets for udp, tcp and tcp-tls.
-	expire    time.Duration             // After this duration a connection is expired.
+	conns     map[string]map[int64]*persistConn //  Buckets for udp, tcp and tcp-tls, then (random) numbers -> *persistConn
+	expire    time.Duration                     // After this duration a connection is expired.
 	addr      string
 	tlsConfig *tls.Config
 
@@ -29,7 +30,7 @@ type transport struct {
 
 func newTransport(addr string, tlsConfig *tls.Config) *transport {
 	t := &transport{
-		conns:  make(map[string][]*persistConn),
+		conns:  make(map[string]map[int64]*persistConn),
 		expire: defaultExpire,
 		addr:   addr,
 		dial:   make(chan string),
@@ -37,18 +38,12 @@ func newTransport(addr string, tlsConfig *tls.Config) *transport {
 		ret:    make(chan *dns.Conn),
 		stop:   make(chan bool),
 	}
+	t.conns["udp"] = make(map[int64]*persistConn)
+	t.conns["tcp"] = make(map[int64]*persistConn)
+	t.conns["tcp-tls"] = make(map[int64]*persistConn)
+
 	go func() { t.connManager() }()
 	return t
-}
-
-// len returns the number of connection, used for metrics. Can only be safely
-// used inside connManager() because of data races.
-func (t *transport) len() int {
-	l := 0
-	for _, conns := range t.conns {
-		l += len(conns)
-	}
-	return l
 }
 
 // connManagers manages the persistent connection cache for UDP and TCP.
@@ -60,41 +55,40 @@ Wait:
 		case proto := <-t.dial:
 			// Yes O(n), shouldn't put millions in here. We walk all connection until we find the first
 			// one that is usuable.
-			i := 0
-			for i = 0; i < len(t.conns[proto]); i++ {
-				pc := t.conns[proto][i]
+
+			ma := t.conns[proto]
+			for k, pc := range ma {
 				if time.Since(pc.used) < t.expire {
 					// Found one, remove from pool and return this conn.
-					t.conns[proto] = t.conns[proto][i+1:]
+					delete(ma, k)
 					t.ret <- pc.c
 					continue Wait
 				}
 				// This conn has expired. Close it.
 				pc.c.Close()
+				delete(ma, k)
 			}
-
-			// Not conns were found. Connect to the upstream to create one.
-			t.conns[proto] = t.conns[proto][i:]
-			SocketGauge.WithLabelValues(t.addr).Set(float64(t.len()))
 
 			t.ret <- nil
 
 		case conn := <-t.yield:
 
-			SocketGauge.WithLabelValues(t.addr).Set(float64(t.len() + 1))
+			//			SocketGauge.WithLabelValues(t.addr).Set(float64(t.len() + 1))
+
+			key := rand.Int63()
 
 			// no proto here, infer from config and conn
 			if _, ok := conn.Conn.(*net.UDPConn); ok {
-				t.conns["udp"] = append(t.conns["udp"], &persistConn{conn, time.Now()})
+				t.conns["udp"][key] = &persistConn{conn, time.Now()}
 				continue Wait
 			}
 
 			if t.tlsConfig == nil {
-				t.conns["tcp"] = append(t.conns["tcp"], &persistConn{conn, time.Now()})
+				t.conns["tcp"][key] = &persistConn{conn, time.Now()}
 				continue Wait
 			}
 
-			t.conns["tcp-tls"] = append(t.conns["tcp-tls"], &persistConn{conn, time.Now()})
+			t.conns["tcp-tls"][key] = &persistConn{conn, time.Now()}
 
 		case <-t.stop:
 			close(t.ret)
