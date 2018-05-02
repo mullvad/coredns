@@ -195,6 +195,15 @@ func BenchmarkRequestSize(b *testing.B) {
 	}
 }
 
+func BenchmarkRequest(b *testing.B) {
+	st := testRequest()
+
+	for i := 0; i < b.N; i++ {
+		name := st.Name()
+		port := st.Port()
+	}
+}
+
 func testRequest() Request {
 	m := new(dns.Msg)
 	m.SetQuestion("example.com.", dns.TypeA)

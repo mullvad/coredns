@@ -62,3 +62,24 @@ func TestWhoami(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkWhoami(b *testing.B) {
+	wh := Whoami{}
+
+	ctx := context.TODO()
+	reqs := make([]*dns.Msg, 5)
+	for i, q := range []string{"example1", "example2", "a", "b", "ddd"} {
+		reqs[i] = new(dns.Msg)
+		reqs[i].SetQuestion(q+".example.org.", dns.TypeA)
+	}
+
+	b.StartTimer()
+
+	j := 0
+	for i := 0; i < b.N; i++ {
+		req := reqs[j]
+		wh.ServeDNS(ctx, &test.ResponseWriter{}, req)
+		j++
+		j = j % 5
+	}
+}

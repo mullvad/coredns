@@ -26,8 +26,11 @@ type Request struct {
 	do   *bool // nil: nothing, otherwise *do value
 	// TODO(miek): opt record itself as well?
 
-	// Cache lowercase qname.
-	name string
+	name   string // Cache lowercase qname.
+	port   string // Cache port
+	ip     string // Cache remote IP
+	proto  string // Cache protocol used
+	family int    // Cache family
 }
 
 // NewWithQuestion returns a new request based on the old, but with a new question
@@ -40,19 +43,29 @@ func (r *Request) NewWithQuestion(name string, typ uint16) Request {
 
 // IP gets the (remote) IP address of the client making the request.
 func (r *Request) IP() string {
+	if r.ip != "" {
+		return r.ip
+	}
 	ip, _, err := net.SplitHostPort(r.W.RemoteAddr().String())
 	if err != nil {
-		return r.W.RemoteAddr().String()
+		r.ip = r.W.RemoteAddr().String()
+		return r.ip
 	}
+	r.ip = ip
 	return ip
 }
 
 // Port gets the (remote) Port of the client making the request.
 func (r *Request) Port() string {
+	if r.port != "" {
+		return r.port
+	}
 	_, port, err := net.SplitHostPort(r.W.RemoteAddr().String())
 	if err != nil {
+		r.port = "0"
 		return "0"
 	}
+	r.port = port
 	return port
 }
 
@@ -62,11 +75,16 @@ func (r *Request) RemoteAddr() string {
 }
 
 // Proto gets the protocol used as the transport. This will be udp or tcp.
-func (r *Request) Proto() string { return Proto(r.W) }
+func (r *Request) Proto() string {
+	if r.proto != "" {
+		return r.proto
+	}
+	r.proto = Proto(r.W)
+	return r.proto
+}
 
 // Proto gets the protocol used as the transport. This will be udp or tcp.
 func Proto(w dns.ResponseWriter) string {
-	// FIXME(miek): why not a method on Request
 	if _, ok := w.RemoteAddr().(*net.UDPAddr); ok {
 		return "udp"
 	}
@@ -78,6 +96,9 @@ func Proto(w dns.ResponseWriter) string {
 
 // Family returns the family of the transport, 1 for IPv4 and 2 for IPv6.
 func (r *Request) Family() int {
+	if r.family != 0 {
+		return r.family
+	}
 	var a net.IP
 	ip := r.W.RemoteAddr()
 	if i, ok := ip.(*net.UDPAddr); ok {
@@ -88,8 +109,10 @@ func (r *Request) Family() int {
 	}
 
 	if a.To4() != nil {
+		r.family = 1
 		return 1
 	}
+	r.family = 2
 	return 2
 }
 
@@ -371,6 +394,10 @@ func (r *Request) ErrorMessage(rcode int) *dns.Msg {
 // Clear clears all caching from Request s.
 func (r *Request) Clear() {
 	r.name = ""
+	r.port = ""
+	r.ip = ""
+	r.proto = ""
+	r.family = 0
 }
 
 // Match checks if the reply matches the qname and qtype from the request, it returns
