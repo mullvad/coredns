@@ -80,11 +80,7 @@ gen:
 
 .PHONY: pb
 pb:
-	( cd pb && \
-          protoc --go_out=plugins=grpc:. dns.proto && \
-          sed -e s?golang.org/x/net/context?context? < dns.pb.go > dns.pb.go.tmp && \
-          mv dns.pb.go.tmp dns.pb.go \
-        )
+	$(MAKE) -C pb
 
 .PHONY: linter
 linter:
